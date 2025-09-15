@@ -1,6 +1,9 @@
 # dnscontrol-action
 
-The _experimental_ (soon to be) Official Github Action (GHA) for DNSControl
+The **experimental** Github Action (GHA) for DNSControl
+
+> [!NOTE]
+> _This project is experimental and not yet recommended for use in production or otherwise important workflows_
 
 This is a composite GitHub action for running configurable DNSControl commands.
 
