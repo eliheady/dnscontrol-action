@@ -42,7 +42,7 @@ You can pre-populate your `creds.json` file and pass in its path as an input, or
 Example with all inputs set:
 
 ```yaml
-uses: StackExchange/dnscontrol-composite-action
+uses: StackExchange/dnscontrol-action
 with:
   check: true
   cmdargs: preview --expect-no-changes
@@ -97,7 +97,7 @@ jobs:
         # call the action with options to run `dnscontrol check` before `dnscontrol preview`,
         # post to the PR, and post to the job summary
         name: call dnscontrol action
-        uses: StackExchange/dnscontrol-composite-action@20815e1d394785504a8411889f845d9d16b8fed7 # v0.0.5
+        uses: StackExchange/dnscontrol-action@f227f6014445e9a45ca0e75d80296a4c7f796884
         with:
           cmdargs: preview
           post_pr_comment: true
