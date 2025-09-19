@@ -1,0 +1,238 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-action.json
+
+name: DNSControl Action
+description: DNSControl GitHub Action using configurable GitHub release
+author: Eli Heady <eli.heady@gmail.com>
+
+inputs:
+
+  check:
+    default: 'false'
+    description: Run `dnscontrol check` before any other commands - default is 'false'
+    required: false
+
+  version:
+    default: 'latest'
+    description: Desired version to run (default 'latest')
+    required: false
+
+  cmdargs:
+    description: DNSControl command and optional arguments
+    required: true
+
+  dnsconfig_file:
+    default: dnsconfig.js
+    description: Path to dnsconfig.js. Defaults to 'dnsconfig.js' (at repository root)
+    required: false
+
+  creds_file:
+    default: creds.json
+    description: Path to creds.json. Defaults to 'creds.json' (at repository root)
+    required: false
+
+  output_file:
+    default: ''
+    description: Write DNSControl output to this file
+    required: false
+
+  post_pr_comment:
+    default: 'false'
+    description: Post the DNSControl output in a PR comment (default 'false')
+    required: false
+
+  post_summary:
+    default: 'false'
+    description: Post the DNSControl output in the step summary (default 'false')
+    required: false
+
+outputs:
+  output:
+    description: DNSControl output
+    value: ${{ steps.dnscontrol.outputs.output }}
+  output_file:
+    description: DNSControl output written to file
+    value: ${{ steps.write_file.outputs.output_file }}
+
+
+runs:
+  using: composite
+  steps:
+
+    - name: Sanitize inputs
+      env:
+        DNSCONTROL_VERSION: ${{ inputs.version }}
+        OUTPUT_FILE: ${{ inputs.output_file }}
+        DNSCONFIG_FILE: ${{ inputs.dnsconfig_file }}
+        CREDS_FILE: ${{ inputs.creds_file }}
+        CMDARGS: ${{ inputs.cmdargs }}
+      shell: bash
+      run: |
+        # Sanitize inputs
+        set +e
+        echo "OUTPUT_FILE=$OUTPUT_FILE" >>"$GITHUB_ENV"
+
+        if [[ ! -e "$DNSCONFIG_FILE" ]]; then
+          echo "the specified dnsconfig_file \"$DNSCONFIG_FILE\" does not exist in workspace"
+          exit 1
+        fi
+        echo "DNSCONFIG_FILE=$DNSCONFIG_FILE" >>"$GITHUB_ENV"
+
+        if [[ ! -e "$CREDS_FILE" ]]; then
+          echo "the specified creds_file \"$CREDS_FILE\" does not exist in workspace"
+          exit 1
+        fi
+        echo "CREDS_FILE=$CREDS_FILE" >>"$GITHUB_ENV"
+
+        if [[ ! "$DNSCONTROL_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          if [[ "$DNSCONTROL_VERSION" != "latest" ]]; then
+            echo "invalid DNSControl version format \"$DNSCONTROL_VERSION\""
+            exit 1
+          fi
+        fi
+        echo "DNSCONTROL_VERSION=$DNSCONTROL_VERSION" >>"$GITHUB_ENV"
+
+        # set default curl args
+        CURL='curl -H user-agent:stackexchange-dnscontrol-action -fsS --retry 5 --retry-max-time 30'
+        echo "CURL=$CURL" >>"$GITHUB_ENV"
+
+        # selectively append `--creds` to commands that need it
+        read -ra ARGS_SPLIT <<< "$CMDARGS"
+        case "${ARGS_SPLIT[0]}" in
+          preview | push | check-creds)
+            CREDS_ARG="--creds $CREDS_FILE"
+          ;;
+          *)
+            CREDS_ARG=""
+          ;;
+        esac
+        echo "CREDS_ARG=$CREDS_ARG" >>"$GITHUB_ENV"
+
+    - name: Resolve download URL for latest
+      if: ${{ inputs.version == 'latest' }}
+      shell: bash
+      run: |
+        # Resolve download URL for latest
+        URL=$(\
+          $CURL -L https://api.github.com/repos/StackExchange/dnscontrol/releases/latest \
+          | jq -r '.assets[] | select(.name? | match("dnscontrol_*.*.*_linux_amd64.tar.gz$")) | .browser_download_url'\
+        )
+        echo "URL=$URL" >>"$GITHUB_ENV"
+
+    - name: Resolve download URL
+      if: ${{ inputs.version != 'latest' }}
+      shell: bash
+      run: |
+        # Resolve download URL
+        URL=$(\
+          $CURL -L https://api.github.com/repos/StackExchange/dnscontrol/releases \
+          | jq -r ".[] | select(.tag_name == \"$DNSCONTROL_VERSION\") | .assets[] | select(.name? | match(\"dnscontrol_*.*.*_linux_amd64.tar.gz$\")) | .browser_download_url" \
+        )
+        echo "URL=$URL" >>"$GITHUB_ENV"
+
+    - name: Download DNSControl
+      shell: bash
+      env:
+        TEMP: ${{ runner.temp }}
+      run: |
+        # Download DNSControl
+        $CURL -L "${URL}" \
+          | tar -C "$TEMP" -xvzf - dnscontrol
+        DNSCONTROL=$(readlink -f "$TEMP/dnscontrol")
+        echo "DNSCONTROL=$DNSCONTROL" >>"$GITHUB_ENV"
+        $DNSCONTROL version
+
+    - name: DNSControl check
+      if: ${{ inputs.check == 'true' }}
+      continue-on-error: true
+      id: check
+      shell: bash
+      env:
+        NO_COLOR: 'true'
+      run: |
+        # DNSControl check
+        set +e
+        DNSCONTROL_CMD=$($DNSCONTROL check --config "$DNSCONFIG_FILE")
+        err=$?
+        export DNSCONTROL_CMD
+        DELIMITER="DNSCONTROL-$RANDOM"
+        {
+          echo "output<<$DELIMITER"
+          echo "$DNSCONTROL_CMD"
+          echo "$DELIMITER"
+        } >>"$GITHUB_OUTPUT"
+        echo "$DNSCONTROL_CMD"
+        exit $err
+
+    - name: Check Summary
+      # write check output to job summary if check failed
+      if: ${{ steps.check.outcome != 'success' && steps.check.outcome != 'skipped' }}
+      shell: bash
+      env:
+        OUTPUT: ${{ steps.check.outputs.output }}
+      run: |
+        # Check Summary
+        echo "$OUTPUT" >>$"GITHUB_STEP_SUMMARY"
+        # check failed, stop the job
+        exit 1
+
+    - name: DNSControl
+      id: dnscontrol
+      # execute only if check was ok or skipped
+      if: ${{ steps.check.outcome == 'success' || steps.check.outcome == 'skipped' }}
+      continue-on-error: true
+      shell: bash
+      env:
+        NO_COLOR: 'true'
+        DNSCONTROL_COMMAND: ${{ inputs.cmdargs }}
+      run: |
+        # DNSControl
+        set +e
+        DNSCONTROL_CMD=$($DNSCONTROL $DNSCONTROL_COMMAND --config "$DNSCONFIG_FILE" $CREDS_ARG)
+        err=$?
+        DELIMITER="DNSCONTROL-$RANDOM"
+        {
+          echo "output<<$DELIMITER"
+          echo "$DNSCONTROL_CMD"
+          echo "$DELIMITER"
+        } >>"$GITHUB_OUTPUT"
+        exit $err
+
+    - name: Write output file
+      id: write_file
+      # execute if user specified an output file AND dnscontrol job ran
+      if: ${{ inputs.output_file != '' && steps.dnscontrol.outcome != 'skipped' }}
+      shell: bash
+      env:
+        OUTPUT_FILE: ${{ inputs.output_file }}
+        OUTPUT: ${{ steps.dnscontrol.outputs.output }}
+      run: |
+        # Write output file
+        echo "$OUTPUT" > "$OUTPUT_FILE"
+        echo "output_file=$OUTPUT_FILE" >>"$GITHUB_OUTPUT"
+
+    - name: Attach Results as PR comment
+      uses: thollander/actions-comment-pull-request@24bffb9b452ba05a4f3f77933840a6a841d1b32b # v3.0.1
+      # execute if user set post_pr_comment, this is a PR event, AND dnscontrol job ran
+      if: ${{ inputs.post_pr_comment && github.event.pull_request.number != '' && steps.dnscontrol.outcome != 'skipped' }}
+      with:
+        comment-tag: dnscontrol_composite_action
+        message: |
+          <details open><summary>DNSControl Results</summary>
+
+          ### DNSControl Results
+
+          ```
+          ${{ steps.dnscontrol.outputs.output }}
+          ```
+          </details>
+
+    - name: Job Summary
+      id: job_summary
+      # execute if user set post_summary AND dnscontrol job ran
+      if: ${{ inputs.post_summary == 'true' && steps.dnscontrol.outcome != 'skipped' }}
+      shell: bash
+      env:
+        OUTPUT: ${{ steps.dnscontrol.outputs.output }}
+      run: |
+        # Job Summary
+        echo "$OUTPUT" >>"$GITHUB_STEP_SUMMARY"

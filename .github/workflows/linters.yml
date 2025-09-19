@@ -1,0 +1,51 @@
+name: 'Run Linters'
+
+on:
+  pull_request:
+    paths:
+      - 'action.yml'
+      - '.github/workflows/*.yml'
+      - '.github/workflows/*.yaml'
+
+permissions:
+  contents: read
+
+jobs:
+  linters:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@f4a75cfd619ee5ce8d5b864b0d183aff3c69b55a # v2.13.1
+        with:
+          egress-policy: audit
+
+      - name: Checkout Repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install yq
+        uses: frenck/action-setup-yq@c4b5be8b4a215c536a41d436757d9feb92836d4f # v1.0.2
+      
+      - name: Install shellcheck
+        env:
+          SHELLCHECK_PREFIX: ${{ runner.temp }}
+        run: |
+          CURL='curl -fsS --retry 5 --retry-max-time 30'
+          URL=$(\
+            $CURL -L https://api.github.com/repos/koalaman/shellcheck/releases/latest \
+            | jq -r '.assets[] | select(.name? | match("shellcheck_*.*.*.linux.x86_64.tar.xz$")) | .browser_download_url'\
+          )
+          VERSION=$(\
+            $CURL -L https://api.github.com/repos/koalaman/shellcheck/releases/latest \
+            | jq -r '.tag_name'\
+          )
+          $CURL -L "${URL}" | xzcat | tar -C $SHELLCHECK_PREFIX -xvf - shellcheck-$VERSION/shellcheck
+          $SHELLCHECK_PREFIX/shellcheck-$VERSION/shellcheck --version
+
+          echo "$SHELLCHECK_PREFIX/shellcheck-$VERSION/shellcheck" >> "$GITHUB_PATH"
+
+      - name: Run shellcheck
+        run: bin/shellcheck.sh
+
