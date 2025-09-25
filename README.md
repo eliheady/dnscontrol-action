@@ -16,9 +16,17 @@ This is a composite GitHub action for running configurable DNSControl commands.
 * Specify alternate locations for `dnsconfig.js` and `creds.json`
 * Choose which version of DNSControl to run (the default is the latest release)
 
-**Credentials**
+# Credentials
 
-You can pre-populate your `creds.json` file and pass in its path as an input, or you can set your API secrets in environment variables and rely on DNSControl's built-in variable interpolation to use variable values to authenticate to your providers.
+Do NOT store API keys or other credentials in a git repo!
+
+We recommend one of three methods:
+
+- **Method 1: creds.json stored as a secret.** Stuff the entire `creds.json` file in a Github "secret".
+- **Method 2: Dynamic creds.json file.** Store the individual credentials as github secrets, and dynamically generate the creds.json file that uses them.
+- **Method 3: Static creds.json file.** Use a static creds.json file that references env variables for any secret.
+
+See the comments in the file for setup instructions.
 
 > [!WARNING]
 > Secret values may be exposed in job logs when using environment variables to pass secrets. GitHub masks known secret values but debug logs or errors in GitHub's masking implementation may expose secret values. In short, populate your `creds.json` secrets and avoid writing secrets to environment variables if possible.
@@ -42,6 +50,7 @@ You can pre-populate your `creds.json` file and pass in its path as an input, or
 Example with all inputs set:
 
 ```yaml
+name: DNSControl-Action
 uses: StackExchange/dnscontrol-action
 with:
   check: true
@@ -60,7 +69,7 @@ Run `dnscontrol preview` from a PR:
 ```yaml
 # yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
 
-name: DNSControl
+name: DNSControl-Preview
 
 on:
   pull_request:
@@ -80,22 +89,13 @@ jobs:
       -
         name: Checkout repo
         uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+
       -
-        # add all secrets needed for creds.json variable interpolation
+        # Extract the secret and write it to the file.
         name: Prepare creds_file
-        run: |
-          cat >creds-populated.json<<EOF
-          {
-            "route53": {
-              "TYPE": "ROUTE53",
-              "KeyId": "${{ secrets.DNSCONTROL_ROUTE53_KEY_ID }}",
-              "SecretKey": "${{ secrets.DNSCONTROL_ROUTE53_KEY }}"
-            }
-          }
-          EOF
+        run: printf '%s' '${{secrets.CREDS_JSON}}' > creds.json
+
       -
-        # call the action with options to run `dnscontrol check` before `dnscontrol preview`,
-        # post to the PR, and post to the job summary
         name: call dnscontrol action
         uses: StackExchange/dnscontrol-action@f227f6014445e9a45ca0e75d80296a4c7f796884
         with:
@@ -103,11 +103,10 @@ jobs:
           post_pr_comment: true
           post_summary: true
           check: true
-          creds_file: creds-populated.json
 ```
 
 ### Contributing
 
-PRs welcome.
+PRs welcome!
 
 Changes or additions to the shell scripts in action.yml should pass `shellcheck -S warning`. A PR workflow will run a shellcheck wrapper (`bin/shellcheck.sh`) and any findings at warning or error levels will fail the check. The wrapper script has been tested in Bash 5.2 and zsh 5.9 on Linux and MacOS.
