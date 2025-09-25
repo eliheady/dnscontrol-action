@@ -151,7 +151,7 @@ runs:
       run: |
         # DNSControl check
         set +e
-        DNSCONTROL_CMD=$($DNSCONTROL check --config "$DNSCONFIG_FILE")
+        DNSCONTROL_CMD=$($DNSCONTROL check --config "$DNSCONFIG_FILE" 2>&1)
         err=$?
         export DNSCONTROL_CMD
         DELIMITER="DNSCONTROL-$RANDOM"
@@ -162,6 +162,29 @@ runs:
         } >>"$GITHUB_OUTPUT"
         echo "$DNSCONTROL_CMD"
         exit $err
+
+    - name: Attach Check Results as PR comment
+      uses: thollander/actions-comment-pull-request@24bffb9b452ba05a4f3f77933840a6a841d1b32b # v3.0.1
+      # execute if user set post_pr_comment, this is a PR event, AND dnscontrol check ran and failed
+      if: ${{
+             inputs.post_pr_comment &&
+             github.event.pull_request.number != '' &&
+             (
+               steps.check.outcome != 'skipped' &&
+               steps.check.outcome != 'success'
+             ) }}
+      with:
+        # comment-tag must be the same for both PR comment steps so they update the same comment
+        comment-tag: dnscontrol_composite_action
+        message: |
+          <details open><summary>DNSControl Check Results</summary>
+
+          ### DNSControl Check Results
+
+          ```
+          ${{ steps.check.outputs.output }}
+          ```
+          </details>
 
     - name: Check Summary
       # write check output to job summary if check failed
@@ -187,7 +210,7 @@ runs:
       run: |
         # DNSControl
         set +e
-        DNSCONTROL_CMD=$($DNSCONTROL $DNSCONTROL_COMMAND --config "$DNSCONFIG_FILE" $CREDS_ARG)
+        DNSCONTROL_CMD=$($DNSCONTROL $DNSCONTROL_COMMAND --config "$DNSCONFIG_FILE" $CREDS_ARG 2>&1)
         err=$?
         DELIMITER="DNSCONTROL-$RANDOM"
         {
@@ -236,3 +259,11 @@ runs:
       run: |
         # Job Summary
         echo "$OUTPUT" >>"$GITHUB_STEP_SUMMARY"
+
+    - name: Action failed
+      if: ${{ steps.dnscontrol.outcome != 'skipped' && steps.dnscontrol.outcome != 'success' }}
+      shell: bash
+      run: |
+        # Action failed
+        echo "DNSControl command failed"
+        exit 1
