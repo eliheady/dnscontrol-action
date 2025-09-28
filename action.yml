@@ -163,28 +163,51 @@ runs:
         echo "$DNSCONTROL_CMD"
         exit $err
 
-    - name: Attach Check Results as PR comment
-      uses: thollander/actions-comment-pull-request@24bffb9b452ba05a4f3f77933840a6a841d1b32b # v3.0.1
-      # execute if user set post_pr_comment, this is a PR event, AND dnscontrol check ran and failed
+    - name: Attach Results as PR comment
+      uses: actions/github-script@v8
       if: ${{
-             inputs.post_pr_comment &&
-             github.event.pull_request.number != '' &&
-             (
-               steps.check.outcome != 'skipped' &&
-               steps.check.outcome != 'success'
-             ) }}
+              inputs.post_pr_comment &&
+              github.event.pull_request.number != '' &&
+              (
+                steps.check.outcome != 'skipped' &&
+                steps.check.outcome != 'success'
+              ) }}
       with:
-        # comment-tag must be the same for both PR comment steps so they update the same comment
-        comment-tag: dnscontrol_composite_action
-        message: |
-          <details open><summary>DNSControl Check Results</summary>
+        script: |
+          const { data: comments } = await github.rest.issues.listComments({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: context.issue.number,
+          })
+          const botComment = comments.find(comment => {
+            return comment.user.type === 'Bot' && comment.body.includes('DNSControl Output')
+          })
 
-          ### DNSControl Check Results
+          const output = `#### DNSControl Output
+          <details><summary>DNSControl Output</summary>
 
-          ```
+          \`\`\`\n
           ${{ steps.check.outputs.output }}
-          ```
-          </details>
+          \`\`\`
+
+          </details>`
+
+          if (botComment) {
+            github.rest.issues.updateComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: botComment.id,
+              body: output
+            })
+          } else {
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            })
+          }
+
 
     - name: Check Summary
       # write check output to job summary if check failed
@@ -234,20 +257,43 @@ runs:
         echo "output_file=$OUTPUT_FILE" >>"$GITHUB_OUTPUT"
 
     - name: Attach Results as PR comment
-      uses: thollander/actions-comment-pull-request@24bffb9b452ba05a4f3f77933840a6a841d1b32b # v3.0.1
-      # execute if user set post_pr_comment, this is a PR event, AND dnscontrol job ran
-      if: ${{ inputs.post_pr_comment && github.event.pull_request.number != '' && steps.dnscontrol.outcome != 'skipped' }}
+      uses: actions/github-script@v8
+      if: github.event_name == 'pull_request'
       with:
-        comment-tag: dnscontrol_composite_action
-        message: |
-          <details open><summary>DNSControl Results</summary>
+        script: |
+          const { data: comments } = await github.rest.issues.listComments({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: context.issue.number,
+          })
+          const botComment = comments.find(comment => {
+            return comment.user.type === 'Bot' && comment.body.includes('DNSControl Output')
+          })
 
-          ### DNSControl Results
+          const output = `#### DNSControl Output
+          <details><summary>DNSControl Output</summary>
 
-          ```
+          \`\`\`\n
           ${{ steps.dnscontrol.outputs.output }}
-          ```
-          </details>
+          \`\`\`
+
+          </details>`
+
+          if (botComment) {
+            github.rest.issues.updateComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: botComment.id,
+              body: output
+            })
+          } else {
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            })
+          }
 
     - name: Job Summary
       id: job_summary
